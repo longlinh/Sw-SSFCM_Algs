@@ -1,0 +1,3 @@
+numpy>=1.24
+scikit-learn>=1.3   # demo + metrics only
+scipy>=1.10         # demo: cluster-accuracy via Hungarian matching
