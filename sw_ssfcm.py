@@ -1,4 +1,4 @@
-"""Sw-SSFCM — Spatial-weighted Softmax-Embedded Semi-Supervised FCM (ISI 2026).
+"""Sw-SSFCM — Spatial-weighted Softmax-Embedded Semi-Supervised FCM.
 
 Extends SeFCM with neighborhood-aware guidance for image data:
 
@@ -9,7 +9,8 @@ Extends SeFCM with neighborhood-aware guidance for image data:
 
 with neighborhood radius ``r in {1, 2}`` (window (2r+1)^2, center excluded).
 
-See ``paper_final/algorithms/alg-swssfcm.tex`` for pseudocode.
+Implements Algorithm 2 of the paper; step numbers in the comments below refer
+to that pseudocode.
 """
 from __future__ import annotations
 
@@ -55,7 +56,8 @@ class SwSSFCM(SeFCM):
         tol: float = 1e-4,
         softmax_lr: float = 0.01,
         softmax_l2: float = 1e-4,
-        softmax_max_epoch: int = 1000,
+        softmax_max_epoch: int = 10000,
+        softmax_tol: float = 0.0,
         random_state: int = 42,
         verbose: bool = False,
     ):
@@ -68,6 +70,7 @@ class SwSSFCM(SeFCM):
             softmax_lr=softmax_lr,
             softmax_l2=softmax_l2,
             softmax_max_epoch=softmax_max_epoch,
+            softmax_tol=softmax_tol,
             random_state=random_state,
             verbose=verbose,
         )
@@ -139,7 +142,7 @@ class SwSSFCM(SeFCM):
         self.P_ = P
         self._softmax = clf
 
-        omega = self._adaptive_omega(P)               # Step 22 (alg-swssfcm.tex)
+        omega = self._adaptive_omega(P)               # Step 22
         self.omega_ = omega
 
         U = P.copy()

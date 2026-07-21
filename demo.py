@@ -1,8 +1,8 @@
 """End-to-end demo for SeFCM and Sw-SSFCM.
 
-Run::
+Run from the repository root::
 
-    python -m algs.demo
+    python demo.py
 """
 from __future__ import annotations
 
@@ -12,24 +12,15 @@ import numpy as np
 
 try:
     from sklearn.datasets import load_iris
-    from sklearn.metrics import normalized_mutual_info_score
-    from scipy.optimize import linear_sum_assignment
     HAS_SK = True
 except Exception:  # pragma: no cover
     HAS_SK = False
 
+from metrics import evaluate
 from sefcm import SeFCM
 from sw_ssfcm import SwSSFCM
 
 SEED = 42
-
-
-def cluster_acc(y_true: np.ndarray, y_pred: np.ndarray, C: int) -> float:
-    M = np.zeros((C, C), dtype=int)
-    for t, p in zip(y_true, y_pred):
-        M[t, p] += 1
-    r, c = linear_sum_assignment(-M)
-    return float(M[r, c].sum()) / len(y_true)
 
 
 def _make_partial(y: np.ndarray, frac: float, rng: np.random.Generator) -> np.ndarray:
@@ -53,9 +44,9 @@ def demo_sefcm():
     model = SeFCM(n_clusters=3, alpha=2.0, random_state=SEED).fit(X, y_partial)
     elapsed = time.time() - t0
 
-    acc = cluster_acc(y, model.labels_, 3)
-    nmi = normalized_mutual_info_score(y, model.labels_)
-    print(f"  ACC={acc:.4f}  NMI={nmi:.4f}  iters={model.n_iter_}  time={elapsed:.2f}s")
+    scores = evaluate(y, model.labels_)
+    print(f"  ACC={scores['acc']:.4f}  NMI={scores['nmi']:.4f}  "
+          f"iters={model.n_iter_}  time={elapsed:.2f}s")
 
 
 def demo_sw_ssfcm():
@@ -79,9 +70,9 @@ def demo_sw_ssfcm():
     ).fit(X, y_partial, image_shape=(H, W))
     elapsed = time.time() - t0
 
-    acc = cluster_acc(y, model.labels_, C)
-    nmi = normalized_mutual_info_score(y, model.labels_)
-    print(f"  ACC={acc:.4f}  NMI={nmi:.4f}  iters={model.n_iter_}  time={elapsed:.2f}s")
+    scores = evaluate(y, model.labels_)
+    print(f"  ACC={scores['acc']:.4f}  NMI={scores['nmi']:.4f}  "
+          f"iters={model.n_iter_}  time={elapsed:.2f}s")
 
 
 if __name__ == "__main__":

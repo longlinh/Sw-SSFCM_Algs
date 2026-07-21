@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+title: SeFCM & Sw-SSFCM — reference implementation
+message: >-
+  If you use this software, please cite both the software itself and the
+  accompanying paper listed under preferred-citation.
+type: software
+authors:
+  - family-names: Nguyen
+    given-names: Xuan Hoang
+  - family-names: Mai
+    given-names: Dinh Sinh
+  - family-names: Nguyen
+    given-names: Long Giang
+repository-code: https://github.com/longlinh/Sw-SSFCM_Algs
+abstract: >-
+  NumPy reference implementation of SeFCM (Fuzzy C-Means with softmax
+  cross-entropy guidance) and Sw-SSFCM (SeFCM extended with spatial
+  neighbourhood weighting), together with scripts that reproduce the
+  hyperspectral image clustering experiments reported in the accompanying
+  paper.
+keywords:
+  - fuzzy c-means
+  - semi-supervised clustering
+  - hyperspectral imaging
+  - remote sensing
+  - spatial weighting
+license: MIT
+version: 1.0.0
+date-released: '2026-07-21'
+preferred-citation:
+  type: article
+  title: >-
+    A novel approach to spatial-weighted semi-supervised fuzzy c-means
+    clustering for hyperspectral image analysis
+  authors:
+    - family-names: Nguyen
+      given-names: Xuan Hoang
+    - family-names: Mai
+      given-names: Dinh Sinh
+    - family-names: Nguyen
+      given-names: Long Giang
+  journal: Computers and Geosciences
+  year: 2026
+  notes: Under review. DOI to be assigned on acceptance.

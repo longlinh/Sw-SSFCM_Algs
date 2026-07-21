@@ -1,4 +1,4 @@
-"""SeFCM — Softmax-Embedded Semi-Supervised Fuzzy C-Means (ISI 2026).
+"""SeFCM — Softmax-Embedded Semi-Supervised Fuzzy C-Means.
 
 Distance with Softmax guidance:
 
@@ -7,7 +7,8 @@ Distance with Softmax guidance:
 where p_{ik} is the softmax probability that point i belongs to class k,
 estimated by a multinomial logistic regressor trained on the labeled subset.
 
-See ``paper_final/algorithms/alg-sefcm.tex`` for pseudocode.
+Implements Algorithm 1 of the paper; step numbers in the comments below refer
+to that pseudocode.
 """
 from __future__ import annotations
 
@@ -41,6 +42,12 @@ class SeFCM:
         Convergence threshold on ||V_new - V_old||_F.
     softmax_lr, softmax_l2, softmax_max_epoch : floats / int
         Softmax-regression hyperparameters.
+    softmax_tol : float, default=0.0
+        Early-stopping threshold on the Softmax loss decrease. The default of
+        ``0.0`` disables early stopping, so the classifier always runs the full
+        ``softmax_max_epoch`` epochs; this is the setting used for the results
+        reported in the paper. Raise it (e.g. ``1e-6``) to trade a little
+        accuracy for a shorter fit.
     random_state : int, default=42
     verbose : bool, default=False
 
@@ -62,7 +69,8 @@ class SeFCM:
         tol: float = 1e-4,
         softmax_lr: float = 0.01,
         softmax_l2: float = 1e-4,
-        softmax_max_epoch: int = 1000,
+        softmax_max_epoch: int = 10000,
+        softmax_tol: float = 0.0,
         random_state: int = 42,
         verbose: bool = False,
     ):
@@ -74,6 +82,7 @@ class SeFCM:
         self.softmax_lr = softmax_lr
         self.softmax_l2 = softmax_l2
         self.softmax_max_epoch = softmax_max_epoch
+        self.softmax_tol = softmax_tol
         self.random_state = random_state
         self.verbose = verbose
 
@@ -84,6 +93,7 @@ class SeFCM:
             lr=self.softmax_lr,
             l2=self.softmax_l2,
             max_epoch=self.softmax_max_epoch,
+            tol=self.softmax_tol,
             random_state=self.random_state,
         )
         clf.fit(X[mask], y_partial[mask])
@@ -111,7 +121,7 @@ class SeFCM:
         if X.shape[0] != y_partial.shape[0]:
             raise ValueError("X and y_partial must have same length.")
 
-        # Step 13 (alg-sefcm.tex): train Softmax on labeled subset.
+        # Step 13: train Softmax on labeled subset.
         clf = self._train_softmax(X, y_partial)
         # Step 14: predict probabilities on all points.
         P = clf.predict_proba(X)

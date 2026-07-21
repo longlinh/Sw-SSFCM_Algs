@@ -1,137 +1,161 @@
-"""Template: run Sw-SSFCM on a hyperspectral image.
+#!/usr/bin/env python3
+"""Run Sw-SSFCM on one hyperspectral scene.
 
-This script is a *blueprint* — adapt the ``load_hsi`` block to whatever
-format your dataset is in. Common HSI benchmarks (Salinas, Indian Pines,
-Pavia, Botswana, KSC, WHU-Hi-LongKou) are typically distributed as either:
+Two ways to point the script at data:
 
-  * MATLAB .mat files containing 3-D cube ``X (H, W, B)`` + ground-truth
-    label image ``Y (H, W)`` with 0 = background, [1..C] = class ids.
-  * ENVI / HDF5 / .npy variants thereof.
+1. By registered scene name, for any of the eight benchmarks of the paper. The
+   file layout and MATLAB variable names are taken from ``reproduce/datasets.py``::
 
-We expect at the end of ``load_hsi`` to obtain:
+       python examples/run_on_hsi.py --dataset indian_pines --data-root ~/data/HSI
 
-    cube : ndarray, shape (H, W, B)   # H rows, W columns, B spectral bands
-    gt   : ndarray, shape (H, W)      # int labels, 0 = ignore
+2. By explicit file paths, for your own scene. Provide the cube file and the
+   ground-truth file plus the MATLAB variable name inside each. The cube must be
+   ``(H, W, B)`` and the ground truth ``(H, W)`` with 0 marking background::
 
-The script then:
-  1. flattens the cube to ``(H*W, B)`` (row-major),
-  2. constructs a partial-label vector with ~`labels_per_class` samples
-     per class drawn at random from labeled pixels,
-  3. fits Sw-SSFCM,
-  4. reports overall ACC + NMI on labeled pixels.
+       python examples/run_on_hsi.py \
+           --cube my_scene.mat --cube-key data \
+           --gt my_scene_gt.mat --gt-key labels \
+           --n-clusters 12
 
-Usage::
+   Pass ``--gt`` the same path as ``--cube`` when both live in one file.
 
-    cd <repo-root>
-    python examples/run_on_hsi.py /path/to/dataset.mat
+The script samples a stratified subset of labelled pixels, fits Sw-SSFCM and
+reports ACC, NMI and ARI over the pixels that carry ground truth.
 
-Requires ``scipy`` to read ``.mat`` files (already in requirements.txt).
+Sensible starting point for alpha: use ``--tau`` instead, which is scale-free
+across scenes; the script converts it with alpha = tau/(1-tau) * d/ln(C).
 """
 from __future__ import annotations
 
-import os
+import argparse
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-# Make sibling modules importable when running from examples/.
+# Make the repository root importable when running from examples/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sw_ssfcm import SwSSFCM                                     # noqa: E402
+from metrics import evaluate                                          # noqa: E402
+from reproduce.datasets import (                                      # noqa: E402
+    DATASET_KEYS,
+    Scene,
+    load_scene,
+    standardize,
+    stratified_labels,
+)
+from sw_ssfcm import SwSSFCM                                          # noqa: E402
 
 SEED = 42
 
 
-# ---------------------------------------------------------------------------
-def load_hsi(path: str) -> tuple[np.ndarray, np.ndarray]:
-    """Load HSI cube + ground truth.
-
-    Adapt this function to your dataset. The default branch handles MATLAB
-    ``.mat`` files containing keys ``X`` and ``Y`` (case-insensitive search).
-    """
+def load_custom_scene(
+    cube_path: str, cube_key: str, gt_path: str, gt_key: str, n_clusters: int | None
+) -> Scene:
+    """Build a Scene from an arbitrary pair of MATLAB files."""
     from scipy.io import loadmat
 
-    mat = loadmat(path)
-    cube_key = next(k for k in mat if k.lower() in {"x", "data", "img", "cube"})
-    gt_key = next(k for k in mat if k.lower() in {"y", "gt", "labels", "groundtruth"})
-    cube = np.asarray(mat[cube_key])
-    gt = np.asarray(mat[gt_key]).astype(int)
-
+    cube = np.asarray(loadmat(cube_path)[cube_key]).astype(np.float64)
     if cube.ndim != 3:
-        raise ValueError(f"Expected 3-D cube (H, W, B), got shape {cube.shape}")
-    if gt.shape != cube.shape[:2]:
-        raise ValueError(
-            f"Cube spatial shape {cube.shape[:2]} != gt shape {gt.shape}"
+        raise ValueError(f"expected a 3-D cube (H, W, B), got shape {cube.shape}")
+    height, width, bands = cube.shape
+
+    gt = np.asarray(loadmat(gt_path)[gt_key]).astype(int)
+    if gt.shape != (height, width):
+        raise ValueError(f"cube is {height}x{width} but ground truth is {gt.shape}")
+    gt = gt.reshape(-1)
+
+    valid_mask = gt > 0
+    y_true = np.full(gt.shape, -1, dtype=int)
+    y_true[valid_mask] = gt[valid_mask] - 1
+
+    return Scene(
+        key="custom",
+        name=Path(cube_path).stem,
+        X=standardize(cube.reshape(height * width, bands)),
+        y_true=y_true,
+        valid_mask=valid_mask,
+        height=height,
+        width=width,
+        n_clusters=n_clusters or int(np.unique(y_true[valid_mask]).size),
+    )
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("--dataset", choices=DATASET_KEYS, help="registered scene name")
+    parser.add_argument("--data-root", help="directory holding registered scenes")
+    parser.add_argument("--cube", help="path to a MATLAB file holding the (H, W, B) cube")
+    parser.add_argument("--cube-key", default="data", help="variable name of the cube")
+    parser.add_argument("--gt", help="path to a MATLAB file holding the (H, W) labels")
+    parser.add_argument("--gt-key", default="labels", help="variable name of the labels")
+    parser.add_argument(
+        "--n-clusters", type=int, help="number of classes (default: inferred)"
+    )
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=0.9,
+        help="normalized guidance strength in [0, 1) (default: 0.9)",
+    )
+    parser.add_argument("--radius", type=int, default=2, choices=(1, 2))
+    parser.add_argument("--labels-per-class", type=int, default=60)
+    parser.add_argument("--max-iter", type=int, default=10000)
+    args = parser.parse_args(argv)
+
+    if args.dataset:
+        if not args.data_root:
+            parser.error("--dataset requires --data-root")
+    elif not (args.cube and args.gt):
+        parser.error("provide either --dataset or both --cube and --gt")
+    return args
+
+
+def main(argv=None) -> None:
+    args = parse_args(argv)
+
+    if args.dataset:
+        scene = load_scene(args.dataset, args.data_root)
+    else:
+        scene = load_custom_scene(
+            args.cube, args.cube_key, args.gt, args.gt_key, args.n_clusters
         )
-    return cube.astype(np.float64), gt
 
+    print(
+        f"[load] {scene.name}: {scene.height}x{scene.width}x{scene.n_bands}, "
+        f"C={scene.n_clusters}, {int(scene.valid_mask.sum()):,} labelled pixels"
+    )
 
-def stratified_partial(gt_flat: np.ndarray, labels_per_class: int,
-                       rng: np.random.Generator) -> np.ndarray:
-    """Pick at most ``labels_per_class`` labeled samples per non-zero class.
+    y_partial = stratified_labels(
+        scene.y_true, scene.valid_mask, args.labels_per_class, seed=SEED
+    )
+    alpha = (args.tau / (1.0 - args.tau)) * (scene.n_bands / np.log(scene.n_clusters))
+    print(
+        f"[fit ] Sw-SSFCM(tau={args.tau}, alpha={alpha:.2f}, radius={args.radius}) "
+        f"on {int(np.sum(y_partial >= 0)):,} labelled samples"
+    )
 
-    Background (gt == 0) is treated as unlabeled. Labels in the returned
-    vector are 0-indexed (gt class 1 -> 0, class 2 -> 1, ...).
-    """
-    yp = np.full_like(gt_flat, -1)
-    for k in np.unique(gt_flat):
-        if k == 0:
-            continue
-        idx = np.where(gt_flat == k)[0]
-        rng.shuffle(idx)
-        yp[idx[: labels_per_class]] = k - 1
-    return yp
-
-
-def cluster_acc(y_true: np.ndarray, y_pred: np.ndarray, C: int) -> float:
-    from scipy.optimize import linear_sum_assignment
-    M = np.zeros((C, C), dtype=int)
-    for t, p in zip(y_true, y_pred):
-        M[t, p] += 1
-    r, c = linear_sum_assignment(-M)
-    return float(M[r, c].sum()) / len(y_true)
-
-
-# ---------------------------------------------------------------------------
-def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-    path = sys.argv[1]
-    if not os.path.isfile(path):
-        sys.exit(f"File not found: {path}")
-
-    print(f"[load] {path}")
-    cube, gt = load_hsi(path)
-    H, W, B = cube.shape
-    C = int(gt.max())
-    print(f"  cube={cube.shape}  bands={B}  classes={C}")
-
-    X = cube.reshape(H * W, B)
-    gt_flat = gt.flatten()
-    rng = np.random.default_rng(SEED)
-    y_partial = stratified_partial(gt_flat, labels_per_class=60, rng=rng)
-
-    # Tip: tune `alpha` per dataset (HSI typically benefits from alpha in [10, 100]).
-    print("[fit] Sw-SSFCM(alpha=30, radius=2)")
-    t0 = time.time()
+    started = time.perf_counter()
     model = SwSSFCM(
-        n_clusters=C, alpha=30.0, radius=2,
-        max_iter=200, tol=1e-4, random_state=SEED,
-    ).fit(X, y_partial, image_shape=(H, W))
-    elapsed = time.time() - t0
-    print(f"  iters={model.n_iter_}  time={elapsed:.1f}s")
+        n_clusters=scene.n_clusters,
+        alpha=alpha,
+        radius=args.radius,
+        max_iter=args.max_iter,
+        random_state=SEED,
+    ).fit(scene.X, y_partial, image_shape=(scene.height, scene.width))
+    elapsed = time.perf_counter() - started
+    print(f"       converged in {model.n_iter_} iterations, {elapsed:.1f}s")
 
-    # Evaluate on labeled pixels only.
-    mask = gt_flat > 0
-    y_true = gt_flat[mask] - 1
-    y_pred = model.labels_[mask]
-    acc = cluster_acc(y_true, y_pred, C)
-    from sklearn.metrics import normalized_mutual_info_score
-    nmi = normalized_mutual_info_score(y_true, y_pred)
-    print(f"[eval] ACC={acc:.4f}  NMI={nmi:.4f}")
+    scores = evaluate(scene.y_true[scene.valid_mask], model.labels_[scene.valid_mask])
+    print(
+        f"[eval] ACC={scores['acc'] * 100:.2f}%  NMI={scores['nmi'] * 100:.2f}%  "
+        f"ARI={scores['ari'] * 100:.2f}%"
+    )
 
 
 if __name__ == "__main__":
