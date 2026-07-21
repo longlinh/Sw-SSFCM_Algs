@@ -180,7 +180,9 @@ and WHU-Hi-LongKou require a free registration with their providers, and the
 script prints the exact steps. Every file is verified against the SHA-256 of the
 copy used to produce the published numbers, so a successful `--verify` run
 guarantees the inputs are identical to ours. Sources and licences are listed in
-[reproduce/README.md](reproduce/README.md).
+[reproduce/README.md](reproduce/README.md). The canonical semi-supervised splits
+(60 labels per class, seed 42) and per-scene download links are also published
+at <https://github.com/longlinh/Sw-SSFCM_Dataset>.
 
 ## Citation
 
