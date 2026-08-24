@@ -13,7 +13,6 @@ dist/
 venv/
 .idea/
 .vscode/
-.claude/
 
 # Hyperspectral cubes are third-party data, never committed.
 *.mat
