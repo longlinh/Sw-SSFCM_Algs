@@ -128,8 +128,24 @@ costs are training the Softmax (mini-batch SGD on `C × budget` labelled samples
 ├── metrics.py       # ACC (Hungarian), NMI, macro-F1, Xie–Beni
 ├── demo.py          # self-contained synthetic demo, no data needed
 ├── docs/            # USER_GUIDE.md, TUTORIAL.md
+├── examples/        # run_on_hsi.py — run the algorithm on one hyperspectral scene
+├── reproduce/       # scripts and published CSV reproducing the paper's benchmark
 ├── requirements.txt, CITATION.cff, LICENSE
 ```
+
+## Reproducing the paper
+
+```bash
+python reproduce/smoke_test.py                                   # synthetic end-to-end check, < 1 min
+python reproduce/make_tables.py --csv reproduce/published/benchmark_budget.csv --results /tmp/published
+python reproduce/download_data.py --data-root ~/data/HSI         # four open scenes + instructions for the other two
+python reproduce/benchmark_budget.py --data-root ~/data/HSI      # full benchmark (6 scenes x 5 budgets x 10 seeds)
+```
+
+`reproduce/published/benchmark_budget.csv` is the exact run reported in the manuscript,
+so the tables can be regenerated without re-running any experiment. See
+[reproduce/README.md](reproduce/README.md) for the step-by-step protocol and
+[examples/run_on_hsi.py](examples/run_on_hsi.py) for a single-scene run.
 
 ## Data availability
 

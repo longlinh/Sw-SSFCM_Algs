@@ -1,0 +1,39 @@
+{
+  "title": "Sw-SSFCM_Algs: reference implementation of spatial-weighted semi-supervised fuzzy c-means for hyperspectral image analysis",
+  "description": "<p>NumPy reference implementation accompanying the manuscript <em>A novel approach to spatial-weighted semi-supervised fuzzy c-means clustering for hyperspectral image analysis</em> (Computers &amp; Geosciences). Implements Sw-SSFCM, a semi-supervised fuzzy c-means whose guidance term carries a frozen spatial prior obtained as the logarithmic opinion pool of Softmax posteriors over the pixel neighbourhood, together with the Sr-SSFCM control, the theta-rule for the guidance weight, the open-set prior for classes without labels, and the scripts reproducing the label-budget benchmark on six hyperspectral scenes.</p>",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "creators": [
+    {
+      "name": "Nguyen, Xuan Hoang",
+      "orcid": "0009-0007-1721-6931",
+      "affiliation": "Graduate University of Sciences and Technology, Vietnam Academy of Science and Technology, Hanoi, Vietnam"
+    },
+    {
+      "name": "Mai, Dinh Sinh",
+      "orcid": "0000-0001-7284-5713",
+      "affiliation": "Le Quy Don Technical University, Hanoi, Vietnam"
+    },
+    {
+      "name": "Nguyen, Long Giang",
+      "orcid": "0000-0001-6184-1469",
+      "affiliation": "Institute of Information Technology, Vietnam Academy of Science and Technology, Hanoi, Vietnam"
+    }
+  ],
+  "keywords": [
+    "fuzzy c-means",
+    "semi-supervised clustering",
+    "hyperspectral imaging",
+    "remote sensing",
+    "opinion pooling",
+    "spatial prior"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/longlinh/Sw-SSFCM_Dataset",
+      "relation": "isSupplementedBy",
+      "scheme": "url"
+    }
+  ]
+}
