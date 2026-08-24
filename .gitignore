@@ -15,6 +15,5 @@ venv/
 .vscode/
 .claude/
 
-# Experiment outputs and downloaded scenes are regenerated, never committed.
-reproduce/results/
+# Hyperspectral cubes are third-party data, never committed.
 *.mat

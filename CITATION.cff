@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: SeFCM & Sw-SSFCM — reference implementation
+title: Sw-SSFCM — reference implementation
 message: >-
   If you use this software, please cite both the software itself and the
   accompanying paper listed under preferred-citation.
@@ -13,20 +13,21 @@ authors:
     given-names: Long Giang
 repository-code: https://github.com/longlinh/Sw-SSFCM_Algs
 abstract: >-
-  NumPy reference implementation of SeFCM (Fuzzy C-Means with softmax
-  cross-entropy guidance) and Sw-SSFCM (SeFCM extended with spatial
-  neighbourhood weighting), together with scripts that reproduce the
-  hyperspectral image clustering experiments reported in the accompanying
-  paper.
+  NumPy reference implementation of Sw-SSFCM, a semi-supervised fuzzy c-means
+  whose distance is augmented by a frozen spatial prior obtained as the
+  log-opinion pool of the Softmax posterior over the pixel neighbourhood,
+  together with the Sr-SSFCM (r = 0) control and a self-contained synthetic
+  demonstration.
 keywords:
   - fuzzy c-means
   - semi-supervised clustering
   - hyperspectral imaging
   - remote sensing
-  - spatial weighting
+  - opinion pooling
+  - spatial prior
 license: MIT
-version: 1.0.0
-date-released: '2026-07-21'
+version: 3.0.0
+date-released: '2026-08-24'
 preferred-citation:
   type: article
   title: >-

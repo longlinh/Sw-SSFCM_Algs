@@ -1,234 +1,107 @@
 # Tutorial
 
-Five worked examples, in increasing order of commitment. Every command is meant
-to be run from the repository root and every one of them has been executed as
-written.
+Five short examples. The first runs on synthetic data with no download; the rest assume
+you have loaded one hyperspectral cube into
 
-| # | Task | Data needed | Time |
-|---|---|---|---|
-| [1](#1-first-run-no-data-required) | Check the install works | none | ~3 s |
-| [2](#2-cluster-your-own-table-of-features) | Cluster a plain feature table | none | ~1 s |
-| [3](#3-cluster-an-image-with-the-spatial-term) | Use the spatial term on an image | none | ~10 s |
-| [4](#4-run-on-a-real-hyperspectral-scene) | Run on a benchmark scene | one download | ~2–5 min |
-| [5](#5-find-the-best-guidance-strength) | Tune `τ` on your own scene | your scene | minutes to hours |
-
-Before starting:
-
-```bash
-pip install -r requirements.txt
+```python
+# X : (N, d) band-wise standardised pixels, row-major (N = H*W)
+# y_true : (N,) ground truth, 0..C-1 on labelled pixels, -1 on background
+# H, W, C : image height, width and number of classes
 ```
 
----
+and drawn a partial-label vector `y` (a few labels per class, the rest `-1`). A seeded
+`stratified_labels(y_true, n_per_class, seed)` helper is in `demo.py`; `unl` below is the
+set of ground-truth pixels that were **not** revealed as labels:
 
-## 1. First run, no data required
+```python
+from demo import stratified_labels
+y = stratified_labels(y_true, n_per_class=10, seed=42)
+unl = (y_true >= 0) & (y < 0)
+```
 
-`demo.py` fits both algorithms on data it generates itself. If this prints two
-lines of scores, the install is good.
+## 1. First run — synthetic scene, no data needed
 
 ```bash
 python demo.py
 ```
 
 ```
-=== Demo 1: SeFCM on Iris ===
-  ACC=0.9467  NMI=0.8449  iters=8  time=0.46s
-
-=== Demo 2: Sw-SSFCM on synthetic 30x30 image ===
-  ACC=0.9967  NMI=0.9830  iters=7  time=0.63s
+Softmax      ACC=0.7424
+Sw-SSFCM r=2 ACC=0.9247  (alpha=1539.9, 3 iterations)
+label image: (64, 64) memberships U: (4096, 6) centroids V: (6, 30)
 ```
 
-For a stronger check that also exercises the tau-sweep and table generation,
-run the smoke test — it asserts determinism and that both contributions help:
+The two lines are the story of the paper in miniature: the spatially pooled prior gives
+the gain over the raw posterior and the guided clustering adds a fuzzy partition.
 
-```bash
-python reproduce/smoke_test.py
+## 2. One label budget on your own cube
+
+```python
+from swssfcm import sw_ssfcm
+from metrics import evaluate
+
+res = sw_ssfcm(X, y, H, W, n_clusters=C, theta=0.99, r=2, seed=42)
+print(evaluate(y_true[unl], res["labels"][unl]))     # {'acc', 'nmi', 'f1'}
 ```
 
-It finishes in under ten seconds and ends with `SMOKE TEST PASSED`.
+## 3. Share one Softmax between variants
 
----
+Training the Softmax is the expensive step; the pooled prior and the clustering are
+cheap, so compare variants on the same posterior by passing `P`:
 
-## 2. Cluster your own table of features
+```python
+from swssfcm import train_softmax, posterior, sw_ssfcm
+lab = y >= 0
+W_, b = train_softmax(X[lab], y[lab], seed=42)
+P = posterior(X, W_, b)
+softmax_labels = P.argmax(1)
+for r in (0, 1, 2):                                  # Sr-SSFCM, Sw-SSFCM r=1, r=2
+    res = sw_ssfcm(X, y, H, W, n_clusters=C, r=r, P=P)
+    print(r, evaluate(y_true[unl], res["labels"][unl])["acc"], res["n_iter"])
+```
 
-Use `SeFCM` when samples have no spatial relationship — a CSV of measurements,
-spectra from field sampling, anything shaped `(N, D)`.
+## 4. θ, ω and the pooling operator
+
+```python
+from swssfcm import theta_scales
+ratio = theta_scales(X, y, seed=42)["ratio"]         # S_d/S_g measured once on the labelled pixels
+for theta in (0.3, 0.5, 0.7, 0.8, 0.9, 0.95, 0.99):
+    res = sw_ssfcm(X, y, H, W, n_clusters=C, theta=theta, P=P, ratio=ratio)
+    print(theta, round(res["alpha"], 1), round(res["share_g"], 3),
+          evaluate(y_true[unl], res["labels"][unl])["acc"], res["n_iter"])
+```
+
+`share_g` (the guidance share realised at convergence) tracks θ; in the paper accuracy
+increases monotonically with θ on every scene and the iteration count drops; at θ close
+to 1 the labels follow the argmax of the pooled prior `π`. The pooling operator and ω:
+
+```python
+sw_ssfcm(..., pool="arith")          # linear opinion pool (≈ −1.2 points on average)
+sw_ssfcm(..., omega=0.25)            # more weight on the neighbourhood (≈ +1.6 points on average)
+sw_ssfcm(..., omega=1.0)             # no neighbourhood = Sr-SSFCM
+```
+
+## 5. Classes without any label (open set)
+
+Suppose classes `{3, 7}` of a 16-class scene have no labelled pixel. The Softmax only
+knows the other 14 classes; `open_set_prior` builds a 16-column prior whose two unseen
+columns carry a novelty score, and the clustering can then create the two missing
+clusters:
 
 ```python
 import numpy as np
-from sklearn.datasets import load_iris
-
-from metrics import evaluate
-from sefcm import SeFCM
-
-X, y = load_iris(return_X_y=True)
-
-# Keep 10% of the labels, stratified; the rest are unknown.
-rng = np.random.default_rng(42)
-y_partial = np.full_like(y, -1)
-for k in np.unique(y):
-    idx = np.where(y == k)[0]
-    y_partial[rng.choice(idx, size=5, replace=False)] = k
-
-model = SeFCM(n_clusters=3, alpha=2.0, random_state=42).fit(X, y_partial)
-
-print(model.labels_[:10])
-print(evaluate(y, model.labels_))
+from swssfcm import train_softmax, posterior, open_set_prior, sw_ssfcm
+y_open = y.copy(); y_open[np.isin(y, [3, 7])] = -1          # hide the two classes
+seen = np.unique(y_open[y_open >= 0])                        # 14 classes
+lab = y_open >= 0
+W_, b = train_softmax(X[lab], y_open[lab], seed=42)
+P = posterior(X, W_, b)                                      # (N, 14), columns ordered as `seen`
+pi = open_set_prior(P, seen, n_clusters=16, H=H, W=W, mode="maha", X=X, y=y_open)
+res = sw_ssfcm(X, y_open, H, W, n_clusters=16, P=P, prior=pi, theta=0.99)
 ```
 
-Three things to carry over to your own data:
-
-- **Standardise `X` first** if the columns have different units. Guidance is
-  compared against a squared distance, so feature scale matters.
-- **`-1` means unlabelled.** Class indices must run `0 … C-1`.
-- **`labels_` holds cluster ids, not class ids.** Use `metrics.evaluate`, which
-  resolves the permutation with the Hungarian algorithm.
-
----
-
-## 3. Cluster an image with the spatial term
-
-`SwSSFCM` additionally needs `image_shape`, and `X` must be flattened
-**row-major** so that row `i` is pixel `(i // W, i % W)`.
-
-```python
-import numpy as np
-
-from metrics import evaluate
-from reproduce.datasets import make_synthetic_scene, stratified_labels
-from sefcm import SeFCM
-from sw_ssfcm import SwSSFCM
-
-scene = make_synthetic_scene(height=64, width=64, n_bands=30, n_clusters=6, seed=42)
-y_partial = stratified_labels(scene.y_true, scene.valid_mask, n_per_class=20, seed=42)
-
-mask = scene.valid_mask
-alpha = 0.9 / (1 - 0.9) * scene.n_bands / np.log(scene.n_clusters)   # tau = 0.9
-
-no_spatial = SeFCM(n_clusters=6, alpha=alpha, random_state=42).fit(scene.X, y_partial)
-spatial = SwSSFCM(n_clusters=6, alpha=alpha, radius=1, random_state=42).fit(
-    scene.X, y_partial, image_shape=(scene.height, scene.width)
-)
-
-print("SeFCM   ", evaluate(scene.y_true[mask], no_spatial.labels_[mask])["acc"])
-print("Sw-SSFCM", evaluate(scene.y_true[mask], spatial.labels_[mask])["acc"])
-```
-
-```
-SeFCM    0.7459274078308088
-Sw-SSFCM 0.794226921977708
-```
-
-The spatial term is worth about five accuracy points here. To view the result as
-an image, reshape it:
-
-```python
-label_image = spatial.labels_.reshape(scene.height, scene.width)
-```
-
-Two mistakes to avoid:
-
-- **Do not drop background pixels before fitting.** Cluster the whole image so
-  neighbourhoods stay intact, then restrict the *evaluation* to labelled pixels.
-- **Do not flatten column-major.** `cube.reshape(H * W, B)` is correct;
-  transposing first silently corrupts every neighbourhood.
-
----
-
-## 4. Run on a real hyperspectral scene
-
-Fetch one scene (Indian Pines is the smallest, about 6 MB):
-
-```bash
-python reproduce/download_data.py --data-root ~/data/HSI --dataset indian_pines
-```
-
-Then run the example script, which handles loading, label sampling, fitting and
-evaluation:
-
-```bash
-python examples/run_on_hsi.py --dataset indian_pines --data-root ~/data/HSI
-```
-
-```
-[load] Indian Pines: 145x145x200, C=16, 10,249 labelled pixels
-[fit ] Sw-SSFCM(tau=0.9, alpha=649.21, radius=2) on 874 labelled samples
-       converged in 18 iterations, 103.7s
-[eval] ACC=75.16%  NMI=65.76%  ARI=50.90%
-```
-
-Useful flags: `--tau`, `--radius`, `--labels-per-class`. See
-`python examples/run_on_hsi.py --help`.
-
-### On a scene of your own
-
-The same script takes explicit paths. Give it the cube file, the ground-truth
-file, and the MATLAB variable name inside each:
-
-```bash
-python examples/run_on_hsi.py \
-    --cube my_scene.mat --cube-key data \
-    --gt my_scene_gt.mat --gt-key labels \
-    --tau 0.9 --radius 2
-```
-
-Requirements on your files: cube shaped `(H, W, B)`, ground truth shaped
-`(H, W)` with `0` for background and `1 … C` for classes. Pass the same path
-twice if both variables live in one file. Use `--n-clusters` to override the
-inferred class count.
-
-If your data is not in MATLAB format, load it however you like and construct a
-`Scene` yourself — see `load_custom_scene` in `examples/run_on_hsi.py` for the
-15 lines involved.
-
----
-
-## 5. Find the best guidance strength
-
-`τ` is the one parameter that genuinely needs tuning. Sweep it with
-`reproduce/tau_sweep.py`, which fits all three variants over a grid and reports
-the best operating point per variant.
-
-Start on synthetic data to see the shape of the output:
-
-```bash
-python reproduce/tau_sweep.py --synthetic --tau 0.3 0.6 0.9
-```
-
-Then on a real scene:
-
-```bash
-python reproduce/tau_sweep.py --data-root ~/data/HSI --datasets indian_pines
-```
-
-```
-Scene                Variant          tau*     alpha*      ACC      NMI
-------------------------------------------------------------------------------
-indian_pines         SeFCM            0.90     649.21   71.22%   59.99%
-indian_pines         Sw-SSFCM_r1      0.95    1370.56   74.71%   65.42%
-indian_pines         Sw-SSFCM_r2      0.95    1370.56   75.24%   65.85%
-```
-
-Turn the results into tables:
-
-```bash
-python reproduce/make_tables.py --results reproduce/results
-```
-
-Notes:
-
-- **Sweep each variant separately.** The spatial term shifts the optimum;
-  reusing SeFCM's `τ*` for Sw-SSFCM understates its accuracy.
-- **`τ` is scale-free, `α` is not.** A `τ` that works on a 100-band scene
-  transfers to a 270-band scene; the corresponding `α` does not.
-- **Start coarse.** `{0.3, 0.6, 0.9}` locates the region; the accuracy curve is
-  flat near its peak, so refine only if you need the last few tenths.
-- Restrict work with `--variants`, `--tau` and `--labels-per-class` while
-  exploring; drop `--max-iter` to something like `200` for a quick look.
-
----
-
-## Where to go next
-
-- [USER_GUIDE.md](USER_GUIDE.md) — every parameter, output and failure mode.
-- [../reproduce/README.md](../reproduce/README.md) — reproducing the published
-  tables, including runtimes and hardware requirements.
+Evaluate the recall of pixels of classes 3 and 7 after Hungarian matching on the
+unlabelled ground truth; the paper reports 19–28 % recall of the missing classes on
+KSC / Houston 2013 with `mode="maha"` at θ = 0.99, at a cost of a few points on the seen
+classes — a capability the classifier does not have (its recall of a missing class is 0
+by construction).
